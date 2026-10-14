@@ -44,7 +44,10 @@ barils. Une légende sous la carte rappelle ce que produit chaque terrain.
 Le **plateau joueur** reprend la disposition des fiches : fiche faction (capacité, 4 méchas à débloquer, bonus
 immédiats de recrue, 6 étoiles) et fiche joueur en 4 colonnes (structure au-dessus de l'action du haut, cubes
 d'amélioration, ouvriers au-dessus de Produire qui révèlent son coût, cases de coût du bas recouvertes par les cubes,
-pièces gagnées, recrue et son bonus permanent). On y choisit sa section d'un clic ; chaque action s'explique au survol.
+pièces gagnées, recrue et son bonus permanent). Tout le tour se joue en cliquant dessus : la colonne, puis l'option
+de l'action du haut, puis l'action du bas (Améliorer : un cube en haut puis le coût à réduire ; Déployer : un mécha
+puis sa case sur la carte ; Construire : une structure puis sa case ; Enrôler : une recrue puis son bonus immédiat).
+Quand il n'y a plus rien à faire, « Fin du tour » s'allume (et la touche Entrée finit le tour).
 
 ## Dispositions
 

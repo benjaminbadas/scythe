@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   BOTTOM_ACTIONS,
   BOTTOM_NAMES,
@@ -13,11 +14,14 @@ import {
   STRUCTURE_NAMES,
   TOP_NAMES,
   WORKERS,
+  bottomRoom,
   describeOption,
   starCount,
   topValue,
   type BottomAction,
   type Player,
+  type RecruitOnce,
+  type Structure,
   type TopAction,
   type TopUpgrade,
 } from '../engine';
@@ -25,7 +29,7 @@ import { Emblem, MechPiece, ResourcePiece, StructurePiece, WorkerPiece } from '.
 import { MECH_TEXT } from './Panels';
 import { FACTION_ABILITY, FACTION_COLORS, FACTION_INK, FACTION_NAMES, MAT_NAMES, ONGOING_LABELS, RECRUIT_LABELS, STAR_ICONS, STRUCTURE_TEXT } from './theme';
 
-function Svg({ children, w = 22, h = 22, vb = '-11 -11 22 22' }: { children: React.ReactNode; w?: number; h?: number; vb?: string }) {
+function Svg({ children, w = 22, h = 22, vb = '-11 -11 22 22' }: { children: ReactNode; w?: number; h?: number; vb?: string }) {
   return (
     <svg width={w} height={h} viewBox={vb} aria-hidden className="pm-svg">
       {children}
@@ -40,53 +44,114 @@ function riverwalkText(p: Player): string {
   return `personnage et méchas traversent les rivières vers les ${TERRAIN_FR[a]} et les ${TERRAIN_FR[b]}.`;
 }
 
+/** Options de l'action du haut, cliquables sur le plateau. */
+export type TopChoice = 'move' | 'gain' | 'trade' | 'tradePop' | 'produce' | 'power' | 'cards';
+
+/** Ce que le joueur peut faire en cliquant sur son plateau pendant son tour. */
+export interface MatUI {
+  /** Choix d'une option de l'action du haut (colonne en cours), avec celles qui sont jouables. */
+  onTop?: (c: TopChoice) => void;
+  topEnabled?: Partial<Record<TopChoice, boolean>>;
+  /** Libellé du bouton de production (nombre de territoires choisis). */
+  produceLabel?: string;
+  /** Améliorer : cube choisi en haut, puis coût du bas. */
+  upgradeFrom?: TopUpgrade | null;
+  onUpgradeFrom?: (u: TopUpgrade) => void;
+  onUpgradeTo?: (a: BottomAction) => void;
+  /** Déployer : mécha choisi. */
+  mech?: number | null;
+  onMech?: (i: number) => void;
+  /** Construire : structure choisie. */
+  structure?: Structure | null;
+  onStructure?: (k: Structure) => void;
+  /** Enrôler : colonne de la recrue, puis bonus immédiat. */
+  enlistSection?: BottomAction | null;
+  onEnlistSection?: (a: BottomAction) => void;
+  onEnlistBonus?: (b: RecruitOnce) => void;
+  /** Action du bas à faire maintenant (mise en évidence). */
+  bottomReady?: boolean;
+}
+
 /** Case améliorable : valeur actuelle, et le cube tant qu'il n'a pas été déplacé. */
-function Cube({ p, u }: { p: Player; u: TopUpgrade }) {
+function Cube({ p, u, ui, inert }: { p: Player; u: TopUpgrade; ui?: MatUI; inert?: boolean }) {
   const on = p.topCubes[u];
-  return (
-    <span className={`pm-up${on ? '' : ' done'}`} title={on ? 'Cube d’amélioration : en le déplaçant, cette valeur gagne +1' : 'Amélioré'}>
+  const pick = !inert && on && !!ui?.onUpgradeFrom;
+  const content = (
+    <>
       <b>{topValue(p, u)}</b>
       {on ? <span className="pm-cube" /> : <span className="pm-plus">+1</span>}
+    </>
+  );
+  if (pick)
+    return (
+      <button
+        type="button"
+        className={`pm-up pick${ui?.upgradeFrom === u ? ' sel' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          ui!.onUpgradeFrom!(u);
+        }}
+        title="Prendre ce cube : cette valeur gagnera +1"
+      >
+        {content}
+      </button>
+    );
+  return (
+    <span className={`pm-up${on ? '' : ' done'}`} title={on ? 'Cube d’amélioration : en le déplaçant, cette valeur gagne +1' : 'Amélioré'}>
+      {content}
     </span>
   );
 }
 
-function TopBlock({ p, top }: { p: Player; top: TopAction }) {
+/** Ligne d'option : bouton quand on peut la choisir, simple texte sinon. */
+function Opt({ ui, c, children }: { ui?: MatUI; c: TopChoice; children: ReactNode }) {
+  if (!ui?.onTop) return <div className="pm-line">{children}</div>;
+  return (
+    <button type="button" className="pm-opt" disabled={!ui.topEnabled?.[c]} onClick={() => ui.onTop!(c)}>
+      {children}
+    </button>
+  );
+}
+
+function TopBlock({ p, top, ui }: { p: Player; top: TopAction; ui?: MatUI }) {
+  const opts = !!ui?.onTop;
   switch (top) {
     case 'move':
       return (
         <>
-          <div className="pm-line">
-            Déplacer <Cube p={p} u="move" /> unités
-          </div>
+          <Opt ui={ui} c="move">
+            Déplacer <Cube p={p} u="move" ui={ui} inert={opts} /> unités
+          </Opt>
           <div className="pm-or">ou</div>
-          <div className="pm-line">
-            Gagner <Cube p={p} u="gain" /> $
-          </div>
+          <Opt ui={ui} c="gain">
+            Gagner <Cube p={p} u="gain" ui={ui} inert={opts} /> $
+          </Opt>
         </>
       );
     case 'trade':
       return (
         <>
           <div className="pm-cost">Payer 1 $</div>
-          <div className="pm-line">2 ressources au choix</div>
+          <Opt ui={ui} c="trade">
+            2 ressources au choix
+          </Opt>
           <div className="pm-or">ou</div>
-          <div className="pm-line">
-            <Cube p={p} u="popularity" /> popularité
-          </div>
+          <Opt ui={ui} c="tradePop">
+            <Cube p={p} u="popularity" ui={ui} inert={opts} /> popularité
+          </Opt>
         </>
       );
     case 'bolster':
       return (
         <>
           <div className="pm-cost">Payer 1 $</div>
-          <div className="pm-line">
-            <Cube p={p} u="power" /> puissance
-          </div>
+          <Opt ui={ui} c="power">
+            <Cube p={p} u="power" ui={ui} inert={opts} /> puissance
+          </Opt>
           <div className="pm-or">ou</div>
-          <div className="pm-line">
-            <Cube p={p} u="cards" /> carte{topValue(p, 'cards') > 1 ? 's' : ''} Combat
-          </div>
+          <Opt ui={ui} c="cards">
+            <Cube p={p} u="cards" ui={ui} inert={opts} /> carte{topValue(p, 'cards') > 1 ? 's' : ''} Combat
+          </Opt>
         </>
       );
     case 'produce': {
@@ -111,42 +176,66 @@ function TopBlock({ p, top }: { p: Player; top: TopAction }) {
               );
             })}
           </div>
-          <div className="pm-line">
-            Produire sur <Cube p={p} u="produce" /> territoires
-          </div>
+          <Opt ui={ui} c="produce">
+            {opts && ui?.produceLabel ? (
+              ui.produceLabel
+            ) : (
+              <>
+                Produire sur <Cube p={p} u="produce" ui={ui} inert={opts} /> territoires
+              </>
+            )}
+          </Opt>
         </>
       );
     }
   }
 }
 
-function BottomBlock({ p, a }: { p: Player; a: BottomAction }) {
+function BottomBlock({ p, a, ui }: { p: Player; a: BottomAction; ui?: MatUI }) {
   const d = MATS[p.mat].bottom[a];
   const res = BOTTOM_RESOURCE[a];
+  // Améliorer : la prochaine case de coût à recouvrir devient une cible.
+  const target = !!ui?.upgradeFrom && !!ui.onUpgradeTo && bottomRoom(p, a) > 0;
+  const nextCovered = d.cost - p.bottomCubes[a] - 1;
+  const recruitPick = !!ui?.onEnlistSection && !p.recruits[a];
+  const boxes = Array.from({ length: d.cost }, (_, k) => {
+    const covered = k > nextCovered;
+    const fixed = k < d.min;
+    return (
+      <span key={k} className={`pm-box${fixed ? ' fixed' : ''}${covered ? ' covered' : ''}${target && k === nextCovered ? ' target' : ''}`}>
+        {covered ? (
+          <span className="pm-cube" />
+        ) : (
+          <Svg w={14} h={14} vb="-8 -8 16 16">
+            <ResourcePiece r={res} />
+          </Svg>
+        )}
+      </span>
+    );
+  });
   return (
     <>
-      <div className="pm-boxes" title={`Coût : ${d.cost - p.bottomCubes[a]} (minimum ${d.min})`}>
-        {Array.from({ length: d.cost }, (_, k) => {
-          const covered = k >= d.cost - p.bottomCubes[a];
-          const fixed = k < d.min;
-          return (
-            <span key={k} className={`pm-box${fixed ? ' fixed' : ''}${covered ? ' covered' : ''}`}>
-              {covered ? (
-                <span className="pm-cube" />
-              ) : (
-                <Svg w={14} h={14} vb="-8 -8 16 16">
-                  <ResourcePiece r={res} />
-                </Svg>
-              )}
-            </span>
-          );
-        })}
-      </div>
+      {target ? (
+        <button type="button" className="pm-boxes pick" onClick={() => ui!.onUpgradeTo!(a)} title={`Poser le cube ici : ${BOTTOM_NAMES[a]} coûtera 1 de moins`}>
+          {boxes}
+        </button>
+      ) : (
+        <div className="pm-boxes" title={`Coût : ${d.cost - p.bottomCubes[a]} (minimum ${d.min})`}>
+          {boxes}
+        </div>
+      )}
       <div className="pm-gain">{d.coins ? `+${d.coins} $` : '—'}</div>
-      <div className={`pm-recruit${p.recruits[a] ? ' out' : ''}`} title="Bonus permanent de recrue : pour vous et vos voisins quand cette action est prise">
-        <span className="pm-cyl" />
-        <small>{p.recruits[a] ? `🎖 ${ONGOING_LABELS[a]}` : ONGOING_LABELS[a]}</small>
-      </div>
+      {recruitPick ? (
+        <button type="button" className={`pm-recruit pick${ui?.enlistSection === a ? ' sel' : ''}`} onClick={() => ui!.onEnlistSection!(a)} title="Enrôler la recrue de cette colonne">
+          <span className="pm-cyl" />
+          <small>{ONGOING_LABELS[a]}</small>
+        </button>
+      ) : (
+        <div className={`pm-recruit${p.recruits[a] ? ' out' : ''}`} title="Bonus permanent de recrue : pour vous et vos voisins quand cette action est prise">
+          <span className="pm-cyl" />
+          <small>{p.recruits[a] ? `🎖 ${ONGOING_LABELS[a]}` : ONGOING_LABELS[a]}</small>
+        </div>
+      )}
     </>
   );
 }
@@ -183,15 +272,18 @@ interface Props {
   secret?: boolean;
   /** Version resserrée : descriptions des méchas en infobulle. */
   compact?: boolean;
+  /** Actions faites en cliquant sur le plateau. */
+  ui?: MatUI;
 }
 
 /** Plateau du joueur, disposé comme les fiches du jeu : fiche faction en haut, fiche joueur dessous. */
-export function PlayerBoard({ p, current, allowed, onSection, secret, compact }: Props) {
+export function PlayerBoard({ p, current, allowed, onSection, secret, compact, ui }: Props) {
   const m = MATS[p.mat];
   const ab = FACTION_ABILITY[p.faction];
   const color = FACTION_COLORS[p.faction];
   const ink = FACTION_INK[p.faction];
   const sections = p.factoryCard !== null ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
+  const bonusPick = !!ui?.onEnlistBonus && !!ui.enlistSection;
   return (
     <div className={`pmat${compact ? ' compact' : ''}`} style={{ ['--fc' as string]: color, ['--fi' as string]: ink }}>
       {/* Fiche faction */}
@@ -229,27 +321,43 @@ export function PlayerBoard({ p, current, allowed, onSection, secret, compact }:
           })}
         </div>
         <div className="pm-mechs">
-          {FACTION_DEFS[p.faction].mechs.map((k, i) => (
-            <div key={k} className={`pm-mech${p.mechDeployed[i] ? ' unlocked' : ''}`} title={k === 'riverwalk' ? `Berge : ${riverwalkText(p)}` : MECH_TEXT[k]}>
-              {p.mechDeployed[i] ? (
-                <span className="pm-mech-free">débloquée</span>
-              ) : (
-                <Svg w={34} h={34} vb="-13 -14 26 27">
-                  <MechPiece color={color} ink={ink} n={1} />
-                </Svg>
-              )}
-              <b>{MECH_NAMES[k]}</b>
-              {!compact && <small>{k === 'riverwalk' ? riverwalkText(p) : MECH_TEXT[k].split(' : ')[1]}</small>}
-            </div>
-          ))}
+          {FACTION_DEFS[p.faction].mechs.map((k, i) => {
+            const pick = !!ui?.onMech && !p.mechDeployed[i];
+            const Tag = pick ? 'button' : 'div';
+            return (
+              <Tag
+                key={k}
+                type={pick ? 'button' : undefined}
+                className={`pm-mech${p.mechDeployed[i] ? ' unlocked' : ''}${pick ? ' pick' : ''}${ui?.mech === i ? ' sel' : ''}`}
+                onClick={pick ? () => ui!.onMech!(i) : undefined}
+                title={k === 'riverwalk' ? `Berge : ${riverwalkText(p)}` : MECH_TEXT[k]}
+              >
+                {p.mechDeployed[i] ? (
+                  <span className="pm-mech-free">débloquée</span>
+                ) : (
+                  <Svg w={34} h={34} vb="-13 -14 26 27">
+                    <MechPiece color={color} ink={ink} n={1} />
+                  </Svg>
+                )}
+                <b>{MECH_NAMES[k]}</b>
+                {!compact && <small>{k === 'riverwalk' ? riverwalkText(p) : MECH_TEXT[k].split(' : ')[1]}</small>}
+              </Tag>
+            );
+          })}
         </div>
         <div className="pm-once" title="Bonus immédiats de recrue (Enrôler)">
-          {RECRUIT_ONCE.map((b) => (
-            <span key={b} className={`pm-once-slot${p.recruitBonus[b] ? ' used' : ''}`}>
-              {p.recruitBonus[b] && <span className="pm-cyl" />}
-              <small>{RECRUIT_LABELS[b]}</small>
-            </span>
-          ))}
+          {RECRUIT_ONCE.map((b) =>
+            bonusPick && !p.recruitBonus[b] ? (
+              <button key={b} type="button" className="pm-once-slot pick" onClick={() => ui!.onEnlistBonus!(b)} title="Prendre ce bonus immédiat">
+                <small>{RECRUIT_LABELS[b]}</small>
+              </button>
+            ) : (
+              <span key={b} className={`pm-once-slot${p.recruitBonus[b] ? ' used' : ''}`}>
+                {p.recruitBonus[b] && <span className="pm-cyl" />}
+                <small>{RECRUIT_LABELS[b]}</small>
+              </span>
+            ),
+          )}
         </div>
       </div>
 
@@ -270,7 +378,8 @@ export function PlayerBoard({ p, current, allowed, onSection, secret, compact }:
       <div className={`pm-grid cols-${sections.length}`}>
         {sections.map((i) => {
           const clickable = !!onSection && !!allowed?.includes(i);
-          const cls = `pm-col${current === i ? ' current' : ''}${p.lastSection === i && current !== i ? ' last' : ''}${clickable ? ' clickable' : ''}${onSection && !clickable ? ' locked' : ''}`;
+          const isCurrent = current === i;
+          const cls = `pm-col${isCurrent ? ' current' : ''}${p.lastSection === i && !isCurrent ? ' last' : ''}${clickable ? ' clickable' : ''}${onSection && !clickable ? ' locked' : ''}`;
           const body =
             i === 4 ? (
               <>
@@ -293,29 +402,37 @@ export function PlayerBoard({ p, current, allowed, onSection, secret, compact }:
                 const a = BOTTOM_ACTIONS[i];
                 const structure = STRUCTURES.find((k) => STRUCTURE_ACTION[k] === top)!;
                 const built = p.structures[structure] !== null;
+                const structPick = !!ui?.onStructure && !built;
+                const structureBody = built ? (
+                  <small>✓ {STRUCTURE_TEXT[structure].split(' : ')[1]}</small>
+                ) : (
+                  <>
+                    <Svg w={20} h={20} vb="-11 -13 22 24">
+                      <StructurePiece kind={structure} color={color} />
+                    </Svg>
+                    <small>{STRUCTURE_NAMES[structure]}</small>
+                  </>
+                );
                 return (
                   <>
-                    <div className={`pm-structure${built ? ' built' : ''}`} title={STRUCTURE_TEXT[structure]}>
-                      {built ? (
-                        <small>✓ {STRUCTURE_TEXT[structure].split(' : ')[1]}</small>
-                      ) : (
-                        <>
-                          <Svg w={20} h={20} vb="-11 -13 22 24">
-                            <StructurePiece kind={structure} color={color} />
-                          </Svg>
-                          <small>{STRUCTURE_NAMES[structure]}</small>
-                        </>
-                      )}
-                    </div>
-                    <div className="pm-top" title={TOP_HELP[top]}>
+                    {structPick ? (
+                      <button type="button" className={`pm-structure pick${ui?.structure === structure ? ' sel' : ''}`} onClick={() => ui!.onStructure!(structure)} title={STRUCTURE_TEXT[structure]}>
+                        {structureBody}
+                      </button>
+                    ) : (
+                      <div className={`pm-structure${built ? ' built' : ''}`} title={STRUCTURE_TEXT[structure]}>
+                        {structureBody}
+                      </div>
+                    )}
+                    <div className={`pm-top${isCurrent && ui?.onTop ? ' live' : ''}`} title={TOP_HELP[top]}>
                       <div className="pm-head">{TOP_NAMES[top]}</div>
-                      <TopBlock p={p} top={top} />
+                      <TopBlock p={p} top={top} ui={isCurrent ? ui : ui && { ...ui, onTop: undefined }} />
                     </div>
-                    <div className="pm-bottom" title={BOTTOM_HELP[a]}>
+                    <div className={`pm-bottom${isCurrent && ui?.bottomReady ? ' live' : ''}`} title={BOTTOM_HELP[a]}>
                       <div className="pm-head">
                         {BOTTOM_NAMES[a]} <small>{BOTTOM_EFFECT[a]}</small>
                       </div>
-                      <BottomBlock p={p} a={a} />
+                      <BottomBlock p={p} a={a} ui={ui} />
                     </div>
                   </>
                 );
@@ -323,7 +440,7 @@ export function PlayerBoard({ p, current, allowed, onSection, secret, compact }:
             );
           return (
             <div key={i} className={cls} onClick={clickable ? () => onSection!(i) : undefined} role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}>
-              {current === i && <span className="pm-token" title="Jeton d’action" />}
+              {isCurrent && <span className="pm-token" title="Jeton d’action" />}
               {body}
             </div>
           );

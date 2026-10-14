@@ -12,7 +12,6 @@ import {
   OBJECTIVE_TEXT,
   RESOURCES,
   RuleError,
-  STRUCTURES,
   STRUCTURE_NAMES,
   TERRAIN_NAMES,
   TOP_NAMES,
@@ -23,6 +22,8 @@ import {
   canPayCost,
   canPayRes,
   controlledRes,
+  controller,
+  produceCost,
   describeOption,
   maxCombatCards,
   movableUnits,
@@ -39,12 +40,14 @@ import {
   type GameState,
   type Gain,
   type ResCounts,
+  type RecruitOnce,
   type Structure,
+  type TopUpgrade,
   type UnitRef,
 } from '../engine';
 import { Board, Legend } from './Board';
-import { PlayerBoard } from './PlayerBoard';
-import { ChoiceForm, EnlistSelect, FactionDot, FinalPanel, Log, PlayerCard, ResPicker, Stepper, UpgradeSelect, bottomText, describeProduceCost, hexLabel, topText } from './Panels';
+import { PlayerBoard, type MatUI, type TopChoice } from './PlayerBoard';
+import { ChoiceForm, FactionDot, FinalPanel, Log, PlayerCard, ResPicker, Stepper, bottomText, describeProduceCost, hexLabel, topText } from './Panels';
 import { BOTTOM_ICONS, FACTION_COLORS, FACTION_SHORT, RES_ICONS, TOP_ICONS } from './theme';
 
 interface Props {
@@ -89,8 +92,8 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   // Actions du bas
   const [mech, setMech] = useState<number | null>(null);
   const [structure, setStructure] = useState<Structure | null>(null);
-  const [enlist, setEnlist] = useState<Choice['enlist']>();
-  const [upgrade, setUpgrade] = useState<Choice['upgrade']>();
+  const [enlistSection, setEnlistSection] = useState<BottomAction | null>(null);
+  const [upgradeFrom, setUpgradeFrom] = useState<TopUpgrade | null>(null);
   // Cartes
   const [factoryOption, setFactoryOption] = useState<number | null>(null);
   const [cardChoice, setCardChoice] = useState<Choice>({});
@@ -109,6 +112,8 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const ap = active >= 0 ? s.players[active] : null;
   const humans = s.players.filter((x) => !x.ai).length;
   const head = t?.pending[0];
+  // Plateau joueur affiché : celui choisi, sinon le sien (en ligne) ou celui du joueur actif.
+  const matOf = matView ?? seat ?? Math.max(0, active);
 
   const reset = () => {
     setOrigin(null);
@@ -119,8 +124,8 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
     setTradeRes({});
     setMech(null);
     setStructure(null);
-    setEnlist(undefined);
-    setUpgrade(undefined);
+    setEnlistSection(null);
+    setUpgradeFrom(null);
     setFactoryOption(null);
     setCardChoice({});
     setEncPicks([]);
@@ -159,11 +164,113 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const selectedUnit = origin !== null && kind ? unitAt(kind, origin) : null;
   const reach = useMemo(() => (selectedUnit ? reachable(s, active, selectedUnit) : new Map<number, number[]>()), [s, active, selectedUnit]);
 
+  // ——— Ce qui reste possible ce tour-ci
+  const mine = myTurn && !!t && !!ap && actor === active;
+  const bottomA: BottomAction | null = sa && sa.bottom !== 'factoryMove' ? sa.bottom : null;
+  const bottomAffordable = !!(ap && bottomA && canPayRes(s, active, { [BOTTOM_RESOURCE[bottomA]]: bottomCost(ap, bottomA) }));
+  const bottomOpen = mine && (t!.stage === 'top' || t!.stage === 'bottom') && bottomAffordable;
+  const millOk = !!ap && ap.structures.mill !== null && controller(s, ap.structures.mill) === active;
+  const prodCost = ap ? produceCost(ap.workers.length) : { power: 0, popularity: 0, coins: 0 };
+  const canProduceCost = !!ap && ap.power >= prodCost.power && ap.popularity >= prodCost.popularity && ap.coins >= prodCost.coins;
+  const topPossible = (() => {
+    if (!ap || !sa) return false;
+    switch (sa.top) {
+      case 'move':
+        return true;
+      case 'trade':
+      case 'bolster':
+        return ap.coins >= 1;
+      case 'produce':
+        return canProduceCost && (workerHexes(s, active).length > 0 || millOk);
+      case 'factory':
+        return FACTORY_CARDS[ap.factoryCard!].some((o) => canPayCost(s, active, o.cost));
+    }
+  })();
+  const bottomPossible = sa?.bottom === 'factoryMove' || bottomAffordable;
+  const objectiveReady = mine && !!ap && ap.objectives.some((o) => objectiveMet(s, active, o));
+  const nothingLeft =
+    mine && !objectiveReady && !!t && (t.stage === 'end' || (t.stage === 'bottom' && !bottomPossible) || (t.stage === 'top' && !topPossible && !bottomPossible));
+  const canEnd = mine && !!t && (t.stage === 'top' || t.stage === 'bottom' || t.stage === 'end');
+
+  const onTop = (c: TopChoice) => {
+    switch (c) {
+      case 'move':
+        return play({ t: 'startMove' });
+      case 'gain':
+        return play({ t: 'gain' });
+      case 'tradePop':
+        return play({ t: 'tradePop' });
+      case 'power':
+      case 'cards':
+        return play({ t: 'bolster', what: c });
+      case 'trade':
+        if (totalRes(tradeRes) === 0) return setError('Choisissez d’abord les 2 ressources dans le panneau d’action.');
+        if (picked.length !== 1) return setError('Cliquez sur la carte le territoire où les placer.');
+        return play({ t: 'trade', res: tradeRes, hex: picked[0] });
+      case 'produce':
+        return play({ t: 'produce', hexes: picked });
+    }
+  };
+  const matUI: MatUI | undefined =
+    mine && matOf === active && (t!.stage === 'top' || t!.stage === 'bottom')
+      ? {
+          onTop: t!.stage === 'top' && sa?.top !== 'factory' ? onTop : undefined,
+          topEnabled: {
+            move: true,
+            gain: true,
+            trade: (ap?.coins ?? 0) >= 1,
+            tradePop: (ap?.coins ?? 0) >= 1,
+            power: (ap?.coins ?? 0) >= 1,
+            cards: (ap?.coins ?? 0) >= 1,
+            produce: canProduceCost && (picked.length > 0 || millOk),
+          },
+          produceLabel: `Produire sur ${picked.length} / ${ap ? topValue(ap, 'produce') : 0} territoire${picked.length > 1 ? 's' : ''}`,
+          bottomReady: t!.stage === 'bottom' && bottomAffordable,
+          upgradeFrom,
+          ...(bottomOpen && bottomA === 'upgrade'
+            ? { onUpgradeFrom: (u: TopUpgrade) => setUpgradeFrom(upgradeFrom === u ? null : u), onUpgradeTo: (a: BottomAction) => upgradeFrom && play({ t: 'upgrade', from: upgradeFrom, to: a }) }
+            : {}),
+          mech,
+          ...(bottomOpen && bottomA === 'deploy' ? { onMech: (i: number) => setMech(mech === i ? null : i) } : {}),
+          structure,
+          ...(bottomOpen && bottomA === 'build' ? { onStructure: (k: Structure) => setStructure(structure === k ? null : k) } : {}),
+          enlistSection,
+          ...(bottomOpen && bottomA === 'enlist'
+            ? {
+                onEnlistSection: (a: BottomAction) => setEnlistSection(enlistSection === a ? null : a),
+                onEnlistBonus: (b: RecruitOnce) => enlistSection && play({ t: 'enlist', section: enlistSection, bonus: b }),
+              }
+            : {}),
+        }
+      : undefined;
+
+  // Présélection : les territoires les plus peuplés pour Produire, le premier pour Échanger.
+  const preKey = t && ap && t.stage === 'top' && mine ? `${turnKey(s)}-${t.section}` : '';
+  useEffect(() => {
+    if (!preKey || !ap || !sa) return;
+    const hexes = workerHexes(s, active)
+      .filter((h) => h !== ap.structures.mill)
+      .sort((a, b) => ap.workers.filter((w) => w === b).length - ap.workers.filter((w) => w === a).length);
+    if (sa.top === 'produce') setPicked(hexes.slice(0, topValue(ap, 'produce')));
+    else if (sa.top === 'trade') setPicked(hexes.slice(0, 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preKey]);
+
+  // Entrée : finir le tour quand il n'y a plus rien à faire.
+  useEffect(() => {
+    if (!nothingLeft) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !(e.target instanceof HTMLInputElement)) play({ t: 'endTurn' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const needsHex =
     myTurn &&
     t &&
     ((t.stage === 'top' && (sa?.top === 'trade' || sa?.top === 'produce')) ||
-      ((t.stage === 'top' || t.stage === 'bottom') && (sa?.bottom === 'deploy' || sa?.bottom === 'build')) ||
+      (bottomOpen && ((sa?.bottom === 'deploy' && mech !== null) || (sa?.bottom === 'build' && !!structure))) ||
       (t.stage === 'top' && sa?.top === 'factory' && factoryOption !== null));
   let targets: Set<number> | undefined;
   if (moving) targets = new Set(reach.keys());
@@ -194,6 +301,14 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
       return;
     }
     if (!targets?.has(h)) return;
+    if (sa?.bottom === 'deploy' && mech !== null && bottomOpen) {
+      play({ t: 'deploy', mech, hex: h });
+      return;
+    }
+    if (sa?.bottom === 'build' && structure && bottomOpen) {
+      play({ t: 'build', structure, hex: h });
+      return;
+    }
     if (t?.stage === 'top' && sa?.top === 'produce') {
       const limit = topValue(ap!, 'produce');
       setPicked((cur) => (cur.includes(h) ? cur.filter((x) => x !== h) : cur.length >= limit ? [...cur.slice(1), h] : [...cur, h]));
@@ -204,8 +319,6 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const combatGate =
     myTurn && seat === null && humans > 1 && head?.k === 'combat' && revealed !== turnKey(s) ? s.players[actor] : null;
   const viewer = seat ?? (myTurn && !combatGate ? actor : null);
-  // Plateau joueur affiché : celui choisi, sinon le sien (en ligne) ou celui du joueur actif.
-  const matOf = matView ?? seat ?? Math.max(0, active);
 
   return (
     <div className="game">
@@ -264,6 +377,11 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
             </button>
           )}
           {(layout === 'classic' || legendOpen) && <Legend />}
+          {canEnd && (
+            <button className={`end-fab${nothingLeft ? ' primary pulse' : ''}`} onClick={() => play({ t: 'endTurn' })}>
+              Fin du tour{nothingLeft ? ' ⏎' : ''}
+            </button>
+          )}
         </section>
 
         <section className="panel mat-panel">
@@ -281,6 +399,7 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
             onSection={matOf === active && myTurn && actor === active && t?.stage === 'section' ? (i) => play({ t: 'section', i }) : undefined}
             secret={viewer === matOf && layout !== 'classic'}
             compact={layout !== 'classic'}
+            ui={matUI}
           />
         </section>
 
@@ -353,19 +472,7 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
               ) : t.stage === 'resolve' && head?.k === 'factory' ? (
                 <FactoryPick s={s} play={play} />
               ) : t.stage === 'bottom' || t.stage === 'end' ? (
-                <BottomControls
-                  s={s}
-                  play={play}
-                  picked={picked}
-                  mech={mech}
-                  setMech={setMech}
-                  structure={structure}
-                  setStructure={setStructure}
-                  enlist={enlist}
-                  setEnlist={setEnlist}
-                  upgrade={upgrade}
-                  setUpgrade={setUpgrade}
-                />
+                <BottomControls s={s} play={play} mech={mech} structure={structure} enlistSection={enlistSection} upgradeFrom={upgradeFrom} affordable={bottomAffordable} />
               ) : null}
               {myTurn && !combatGate && actor === active && t.stage !== 'resolve' && <Objectives s={s} play={play} />}
               {myTurn && !combatGate && (
@@ -375,9 +482,9 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
                       Annuler
                     </button>
                   )}
-                  {actor === active && (t.stage === 'bottom' || t.stage === 'end' || t.stage === 'top') && (
-                    <button className={t.stage === 'end' ? 'primary' : ''} onClick={() => play({ t: 'endTurn' })}>
-                      Fin du tour
+                  {canEnd && (
+                    <button className={nothingLeft ? 'primary big pulse' : ''} onClick={() => play({ t: 'endTurn' })} title={nothingLeft ? 'Plus rien à faire : Entrée pour finir' : undefined}>
+                      {nothingLeft ? 'Fin du tour ⏎' : 'Fin du tour'}
                     </button>
                   )}
                 </div>
@@ -500,75 +607,45 @@ function TopControls({ s, play, picked, tradeRes, setTradeRes, factoryOption, se
   const p = s.players[me];
   const sa = sectionActions(p, t.section!);
   const skip = (
-    <button className="ghost" onClick={() => play({ t: 'skipTop' })}>
+    <button className="ghost small-btn" onClick={() => play({ t: 'skipTop' })}>
       Passer l’action du haut
     </button>
   );
+  const bottomHint = sa.bottom === 'factoryMove' ? '' : ` Vous pouvez aussi passer directement à ${BOTTOM_NAMES[sa.bottom]}.`;
   switch (sa.top) {
     case 'move':
+    case 'bolster':
       return (
         <div className="controls">
-          <h3>{TOP_ICONS.move} Déplacer</h3>
-          <div className="row wrap">
-            <button className="primary" onClick={() => play({ t: 'startMove' })}>
-              Déplacer jusqu’à {topValue(p, 'move')} unités
-            </button>
-            <button onClick={() => play({ t: 'gain' })}>Gagner {topValue(p, 'gain')} $</button>
-            {skip}
-          </div>
+          <p className="hint">
+            {TOP_ICONS[sa.top]} <b>{TOP_NAMES[sa.top]}</b> : cliquez une option en surbrillance sur votre plateau joueur.{bottomHint}
+          </p>
+          {skip}
         </div>
       );
     case 'trade':
       return (
         <div className="controls">
-          <h3>{TOP_ICONS.trade} Échanger (1 $)</h3>
-          <p className="hint">2 ressources au choix, placées sur un territoire contrôlé avec un ouvrier (cliquez-le sur le plateau).</p>
+          <p className="hint">
+            {TOP_ICONS.trade} <b>Échanger</b> : choisissez 2 ressources, le territoire sur la carte ({picked.length === 1 ? hexLabel(picked[0]) : 'à cliquer'}), puis « 2 ressources au choix » sur
+            votre plateau. Ou prenez la popularité.
+          </p>
           <ResPicker value={tradeRes} max={2} onChange={setTradeRes} />
-          <div className="row wrap">
-            <button className="primary" disabled={p.coins < 1 || totalRes(tradeRes) === 0 || picked.length !== 1} onClick={() => play({ t: 'trade', res: tradeRes, hex: picked[0] })}>
-              Prendre {picked.length === 1 ? `sur ${hexLabel(picked[0])}` : 'les ressources'}
-            </button>
-            <button disabled={p.coins < 1} onClick={() => play({ t: 'tradePop' })}>
-              +{topValue(p, 'popularity')} popularité
-            </button>
-            {skip}
-          </div>
+          {skip}
         </div>
       );
     case 'produce': {
       const mill = p.structures.mill;
       return (
         <div className="controls">
-          <h3>{TOP_ICONS.produce} Produire</h3>
           <p className="hint">
-            Cliquez jusqu’à {topValue(p, 'produce')} territoires où vous avez des ouvriers. Coût : {describeProduceCost(p)}.
-            {mill !== null && ' Le Moulin produit en plus sur son territoire.'}
+            {TOP_ICONS.produce} <b>Produire</b> : {picked.length ? picked.map(hexLabel).join(', ') : 'aucun territoire'} (cliquez sur la carte pour changer, jusqu’à{' '}
+            {topValue(p, 'produce')}). Coût : {describeProduceCost(p)}.{mill !== null && ' Le Moulin produit en plus.'} Puis « Produire » sur votre plateau.
           </p>
-          <p className="small">{picked.length ? picked.map(hexLabel).join(', ') : 'Aucun territoire choisi.'}</p>
-          <div className="row wrap">
-            <button className="primary" disabled={!picked.length && mill === null} onClick={() => play({ t: 'produce', hexes: picked })}>
-              Produire
-            </button>
-            {skip}
-          </div>
+          {skip}
         </div>
       );
     }
-    case 'bolster':
-      return (
-        <div className="controls">
-          <h3>{TOP_ICONS.bolster} Renforcer (1 $)</h3>
-          <div className="row wrap">
-            <button className="primary" disabled={p.coins < 1} onClick={() => play({ t: 'bolster', what: 'power' })}>
-              +{topValue(p, 'power')} puissance
-            </button>
-            <button disabled={p.coins < 1} onClick={() => play({ t: 'bolster', what: 'cards' })}>
-              +{topValue(p, 'cards')} carte{topValue(p, 'cards') > 1 ? 's' : ''} Combat
-            </button>
-            {skip}
-          </div>
-        </div>
-      );
     case 'factory': {
       const card = FACTORY_CARDS[p.factoryCard!];
       const opt = factoryOption !== null ? card[factoryOption] : null;
@@ -668,118 +745,55 @@ function MoveControls({ s, play, origin, kind, setKind, unitAt, carryWorkers, se
 interface BottomProps {
   s: GameState;
   play: Play;
-  picked: number[];
   mech: number | null;
-  setMech: (m: number | null) => void;
   structure: Structure | null;
-  setStructure: (k: Structure | null) => void;
-  enlist: Choice['enlist'];
-  setEnlist: (e: Choice['enlist']) => void;
-  upgrade: Choice['upgrade'];
-  setUpgrade: (u: Choice['upgrade']) => void;
+  enlistSection: BottomAction | null;
+  upgradeFrom: TopUpgrade | null;
+  affordable: boolean;
 }
 
-function BottomControls({ s, play, picked, mech, setMech, structure, setStructure, enlist, setEnlist, upgrade, setUpgrade }: BottomProps) {
+function BottomControls({ s, play, mech, structure, enlistSection, upgradeFrom, affordable }: BottomProps) {
   const t = s.turn!;
   const me = t.active;
   const p = s.players[me];
   const sa = sectionActions(p, t.section!);
-  if (t.stage === 'end') return <p className="hint">Action terminée. Révélez un objectif si vous le pouvez, puis finissez le tour.</p>;
+  if (t.stage === 'end') return <p className="hint">✔ Action terminée. Révélez un objectif si vous le pouvez, puis finissez le tour.</p>;
   if (sa.bottom === 'factoryMove')
     return (
       <div className="controls">
-        <h3>🥾 Déplacement de la carte Usine</h3>
         <button className="primary" onClick={() => play({ t: 'factoryMove' })}>
-          Déplacer une unité jusqu’à 2 fois
+          🥾 Déplacer une unité jusqu’à 2 fois (Usine)
         </button>
       </div>
     );
   const a: BottomAction = sa.bottom;
   const cost = bottomCost(p, a);
   const res = BOTTOM_RESOURCE[a];
-  const affordable = canPayRes(s, me, { [res]: cost });
   const have = controlledRes(s, me)[res];
-  const header = (
-    <>
-      <h3>
-        {BOTTOM_ICONS[a]} {BOTTOM_NAMES[a]} — {cost} {RES_ICONS[res]} <small className="muted">(vous en contrôlez {have})</small>
-      </h3>
-      {!affordable && <p className="muted small">Pas assez de ressources : finissez le tour.</p>}
-    </>
+  if (!affordable)
+    return (
+      <p className="hint">
+        {BOTTOM_ICONS[a]} <b>{BOTTOM_NAMES[a]}</b> coûte {cost} {RES_ICONS[res]} et vous n’en contrôlez que {have} : plus rien à faire, finissez le tour.
+      </p>
+    );
+  const step: Record<BottomAction, string> = {
+    upgrade: upgradeFrom ? '② Cliquez maintenant le coût à réduire (case en surbrillance) en bas d’une colonne.' : '① Cliquez un cube en haut de votre plateau (une valeur à améliorer).',
+    deploy: mech === null ? '① Cliquez un mécha sur votre fiche faction.' : `② Cliquez sur la carte le territoire où le déployer (${MECH_NAMES[FACTION_DEFS[p.faction].mechs[mech]]}).`,
+    build: !structure ? '① Cliquez une structure en haut d’une colonne de votre plateau.' : `② Cliquez sur la carte le territoire où construire (${STRUCTURE_NAMES[structure]}).`,
+    enlist: !enlistSection ? '① Cliquez la recrue (cylindre) d’une colonne : son bonus permanent.' : '② Cliquez le bonus immédiat à prendre sur votre fiche faction.',
+  };
+  return (
+    <div className="controls">
+      <p className="hint">
+        {BOTTOM_ICONS[a]} <b>{BOTTOM_NAMES[a]}</b> ({cost} {RES_ICONS[res]}, vous en contrôlez {have}) — {step[a]}
+      </p>
+      <div className="row wrap">
+        <button className="ghost small-btn" onClick={() => play({ t: a } as Action)}>
+          Payer seulement pour les pièces
+        </button>
+      </div>
+    </div>
   );
-  const only = (
-    <button disabled={!affordable} className="ghost" onClick={() => play({ t: a } as Action)}>
-      Payer seulement pour les pièces
-    </button>
-  );
-  switch (a) {
-    case 'upgrade':
-      return (
-        <div className="controls">
-          {header}
-          <UpgradeSelect p={p} value={upgrade} onChange={setUpgrade} />
-          <div className="row wrap">
-            <button className="primary" disabled={!affordable || !upgrade} onClick={() => play({ t: 'upgrade', from: upgrade!.from, to: upgrade!.to })}>
-              Améliorer
-            </button>
-            {only}
-          </div>
-        </div>
-      );
-    case 'deploy':
-      return (
-        <div className="controls">
-          {header}
-          <div className="choices">
-            {FACTION_DEFS[p.faction].mechs.map((k, i) => (
-              <button key={k} className={`choice-line${mech === i ? ' on' : ''}`} disabled={p.mechDeployed[i]} onClick={() => setMech(i)}>
-                🤖 {MECH_NAMES[k]}
-              </button>
-            ))}
-          </div>
-          <p className="hint">Puis cliquez un territoire contrôlé avec un ouvrier.</p>
-          <div className="row wrap">
-            <button className="primary" disabled={!affordable || mech === null || picked.length !== 1} onClick={() => play({ t: 'deploy', mech: mech!, hex: picked[0] })}>
-              Déployer {picked.length === 1 ? `sur ${hexLabel(picked[0])}` : ''}
-            </button>
-            {only}
-          </div>
-        </div>
-      );
-    case 'build':
-      return (
-        <div className="controls">
-          {header}
-          <div className="choices">
-            {STRUCTURES.map((k) => (
-              <button key={k} className={`choice-line${structure === k ? ' on' : ''}`} disabled={p.structures[k] !== null} onClick={() => setStructure(k)}>
-                {STRUCTURE_NAMES[k]}
-              </button>
-            ))}
-          </div>
-          <p className="hint">Puis cliquez un territoire contrôlé avec un ouvrier, sans structure.</p>
-          <div className="row wrap">
-            <button className="primary" disabled={!affordable || !structure || picked.length !== 1} onClick={() => play({ t: 'build', structure: structure!, hex: picked[0] })}>
-              Construire {picked.length === 1 ? `sur ${hexLabel(picked[0])}` : ''}
-            </button>
-            {only}
-          </div>
-        </div>
-      );
-    case 'enlist':
-      return (
-        <div className="controls">
-          {header}
-          <EnlistSelect p={p} value={enlist} onChange={setEnlist} />
-          <div className="row wrap">
-            <button className="primary" disabled={!affordable || !enlist} onClick={() => play({ t: 'enlist', section: enlist!.section, bonus: enlist!.bonus })}>
-              Enrôler
-            </button>
-            {only}
-          </div>
-        </div>
-      );
-  }
 }
 
 function CombatControls({ s, play, dial, setDial, cards, setCards }: { s: GameState; play: Play; dial: number; setDial: (n: number) => void; cards: number[]; setCards: (c: number[]) => void }) {
