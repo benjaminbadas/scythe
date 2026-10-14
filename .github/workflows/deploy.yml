@@ -1,0 +1,85 @@
+name: Tests et déploiement
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  # Déploiement sur l'hébergement OVH, activé par la variable de dépôt DEPLOY_OVH = true.
+  # Secrets requis : OVH_FTP_HOST, OVH_FTP_USER, OVH_FTP_PASSWORD.
+  # Variables facultatives : OVH_DIR (défaut « www/scythe »), OVH_BASE_PATH (défaut « /scythe/ »),
+  # OVH_PROTOCOL (défaut « sftp », ou « ftp »).
+  deploy-ovh:
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_OVH == 'true'
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency: deploy-ovh
+    environment:
+      name: ovh
+      url: https://badas.tech${{ vars.OVH_BASE_PATH || '/scythe/' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          BASE_PATH: ${{ vars.OVH_BASE_PATH || '/scythe/' }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp netcat-openbsd
+      - name: Diagnostic de connexion
+        env:
+          HOST: ${{ secrets.OVH_FTP_HOST }}
+        run: |
+          # Le nom du serveur est masqué dans les journaux : on vérifie seulement sa forme.
+          case "$HOST" in
+            *://*|*/*|*:*|*" "*) echo "::error::OVH_FTP_HOST doit être un nom de serveur seul, ex. ftp.clusterXXX.hosting.ovh.net (sans protocole, port ni /)"; exit 1 ;;
+          esac
+          case "$HOST" in
+            *.hosting.ovh.net) echo "Forme du serveur : OK (*.hosting.ovh.net)" ;;
+            *) echo "::warning::OVH_FTP_HOST ne se termine pas par .hosting.ovh.net ; vérifiez le serveur indiqué dans l'onglet FTP - SSH" ;;
+          esac
+          for port in 22 21; do
+            if nc -z -w 10 "$HOST" "$port"; then echo "Port $port : joignable"; else echo "Port $port : injoignable"; fi
+          done
+      - name: Envoi des fichiers
+        env:
+          HOST: ${{ secrets.OVH_FTP_HOST }}
+          USER: ${{ secrets.OVH_FTP_USER }}
+          PASSWORD: ${{ secrets.OVH_FTP_PASSWORD }}
+          DIR: ${{ vars.OVH_DIR || 'www/scythe' }}
+          PROTOCOL: ${{ vars.OVH_PROTOCOL || 'sftp' }}
+        run: |
+          # Garde-fou : la synchronisation supprime les fichiers obsolètes du répertoire cible,
+          # elle ne doit jamais viser la racine du site. Les parties en ligne sont rangées hors du
+          # site (/home/<compte>/scythe-data) ; api/data, leur dossier de repli, est préservé.
+          case "${DIR%/}" in
+            ""|"/"|"www"|"/www"|"."|"~") echo "OVH_DIR invalide : $DIR" && exit 1 ;;
+          esac
+          lftp -u "$USER,$PASSWORD" "$PROTOCOL://$HOST" -e "
+            set sftp:auto-confirm yes;
+            set ftp:ssl-allow yes;
+            set net:timeout 20;
+            set net:max-retries 2;
+            set net:reconnect-interval-base 5;
+            mkdir -p -f $DIR;
+            mirror --reverse --delete --verbose --exclude-glob api/data/ dist/ $DIR/;
+            bye"
