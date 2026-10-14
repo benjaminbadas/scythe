@@ -1448,3 +1448,12 @@ button.pm-once-slot {
   padding: 4px 8px;
   justify-self: start;
 }
+
+.cargo {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #1f1a14;
+  border: 1px solid #5a4a32;
+}

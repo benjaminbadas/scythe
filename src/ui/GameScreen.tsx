@@ -48,7 +48,7 @@ import {
 import { Board, Legend } from './Board';
 import { PlayerBoard, type MatUI, type TopChoice } from './PlayerBoard';
 import { ChoiceForm, FactionDot, FinalPanel, Log, PlayerCard, ResPicker, Stepper, bottomText, describeProduceCost, hexLabel, topText } from './Panels';
-import { BOTTOM_ICONS, FACTION_COLORS, FACTION_SHORT, RES_ICONS, TOP_ICONS } from './theme';
+import { BOTTOM_ICONS, FACTION_COLORS, FACTION_SHORT, RES_ICONS, RES_LABELS, TOP_ICONS } from './theme';
 
 interface Props {
   game: GameState;
@@ -85,7 +85,7 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const [origin, setOrigin] = useState<number | null>(null);
   const [kind, setKind] = useState<UnitKind | null>(null);
   const [carryWorkers, setCarryWorkers] = useState(0);
-  const [carryRes, setCarryRes] = useState(false);
+  const [carryRes, setCarryRes] = useState<Partial<ResCounts>>({});
   // Choix de cases et de ressources
   const [picked, setPicked] = useState<number[]>([]);
   const [tradeRes, setTradeRes] = useState<Partial<ResCounts>>({});
@@ -119,7 +119,7 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
     setOrigin(null);
     setKind(null);
     setCarryWorkers(0);
-    setCarryRes(false);
+    setCarryRes({});
     setPicked([]);
     setTradeRes({});
     setMech(null);
@@ -142,7 +142,7 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
         setOrigin(null);
         setKind(null);
         setCarryWorkers(0);
-        setCarryRes(false);
+        setCarryRes({});
       }
       onPlay(next);
     } catch (e) {
@@ -288,15 +288,17 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
         const u = selectedUnit;
         const from = origin!;
         const workers = u.k === 'mech' ? ap!.workers.map((w, i) => (w === from ? i : -1)).filter((i) => i >= 0).slice(0, carryWorkers) : [];
-        play({ t: 'move', unit: u, path: reach.get(h)!, workers, res: carryRes ? { ...s.board.res[from] } : undefined });
+        play({ t: 'move', unit: u, path: reach.get(h)!, workers, res: totalRes(carryRes) ? carryRes : undefined });
         return;
       }
       if (movableHexes.has(h)) {
         setOrigin(h);
-        const k = (['character', 'mech', 'worker'] as UnitKind[]).find((x) => unitAt(x, h));
+        // Un mécha avec des ouvriers sur la case : on propose de les emmener tous ; sinon le personnage d'abord.
+        const workersHere = ap!.workers.filter((w) => w === h).length;
+        const k = (workersHere && unitAt('mech', h) ? ['mech'] : ['character', 'mech', 'worker']).find((x) => unitAt(x as UnitKind, h)) as UnitKind | undefined;
         setKind(k ?? null);
-        setCarryWorkers(0);
-        setCarryRes(false);
+        setCarryWorkers(k === 'mech' ? workersHere : 0);
+        setCarryRes({});
       }
       return;
     }
@@ -688,8 +690,8 @@ interface MoveProps {
   unitAt: (k: UnitKind, hex: number) => UnitRef | null;
   carryWorkers: number;
   setCarryWorkers: (n: number) => void;
-  carryRes: boolean;
-  setCarryRes: (b: boolean) => void;
+  carryRes: Partial<ResCounts>;
+  setCarryRes: (r: Partial<ResCounts>) => void;
 }
 
 const KIND_LABELS: Record<UnitKind, string> = { character: '★ Personnage', mech: '⚙ Mécha', worker: '👷 Ouvrier' };
@@ -698,33 +700,67 @@ function MoveControls({ s, play, origin, kind, setKind, unitAt, carryWorkers, se
   const t = s.turn!;
   const p = s.players[t.active];
   const workersHere = origin === null ? 0 : p.workers.filter((w) => w === origin).length;
-  const resHere = origin === null ? 0 : totalRes(s.board.res[origin]);
+  const resHere = origin === null ? null : s.board.res[origin];
+  const totalHere = resHere ? totalRes(resHere) : 0;
+  const choose = (k: UnitKind) => {
+    setKind(k);
+    setCarryWorkers(k === 'mech' ? workersHere : 0);
+  };
   return (
     <div className="controls">
       <h3>
         🥾 {t.factoryMove ? 'Déplacer une unité jusqu’à 2 fois (Usine)' : `Déplacer — encore ${t.movesLeft} unité${t.movesLeft > 1 ? 's' : ''}`}
       </h3>
-      <p className="hint">Cliquez une case où vous avez une unité, puis sa destination (en surbrillance).</p>
-      {origin !== null && (
+      {origin === null ? (
+        <p className="hint">① Cliquez sur la carte une case où vous avez des unités (bordure en pointillés).</p>
+      ) : (
         <>
+          <p className="hint">② Choisissez l’unité et son chargement, puis ③ cliquez sa destination (en surbrillance).</p>
           <div className="row wrap">
             {(['character', 'mech', 'worker'] as UnitKind[]).map((k) =>
               unitAt(k, origin) ? (
-                <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
+                <button key={k} className={kind === k ? 'on' : ''} onClick={() => choose(k)}>
                   {KIND_LABELS[k]}
                 </button>
               ) : null,
             )}
           </div>
-          {kind === 'mech' && workersHere > 0 && (
-            <label className="row">
-              Ouvriers transportés <Stepper value={carryWorkers} min={0} max={workersHere} onChange={setCarryWorkers} />
-            </label>
-          )}
-          {resHere > 0 && (
-            <label className="row">
-              <input type="checkbox" checked={carryRes} onChange={(e) => setCarryRes(e.target.checked)} /> Emporter les ressources de la case ({resHere})
-            </label>
+          {(workersHere > 0 || totalHere > 0) && kind && (
+            <div className="cargo">
+              <b>Chargement</b>
+              {workersHere > 0 &&
+                (kind === 'mech' ? (
+                  <label className="row">
+                    👷 Ouvriers transportés <Stepper value={Math.min(carryWorkers, workersHere)} min={0} max={workersHere} onChange={setCarryWorkers} />
+                    <small className="muted">/ {workersHere}</small>
+                  </label>
+                ) : (
+                  <small className="muted">
+                    👷 Seuls les méchas transportent des ouvriers{unitAt('mech', origin) ? ' : choisissez « Mécha » pour les emmener.' : '.'}
+                  </small>
+                ))}
+              {totalHere > 0 && resHere && (
+                <>
+                  <div className="row wrap">
+                    <small>Ressources emportées :</small>
+                    <button className="ghost small-btn" onClick={() => setCarryRes({ ...resHere })}>
+                      Tout
+                    </button>
+                    <button className="ghost small-btn" onClick={() => setCarryRes({})}>
+                      Rien
+                    </button>
+                  </div>
+                  <div className="res-picker">
+                    {RESOURCES.filter((r) => resHere[r] > 0).map((r) => (
+                      <label key={r} title={RES_LABELS[r]}>
+                        <span>{RES_ICONS[r]}</span>
+                        <Stepper value={carryRes[r] ?? 0} min={0} max={resHere[r]} onChange={(n) => setCarryRes({ ...carryRes, [r]: n })} />
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </>
       )}
