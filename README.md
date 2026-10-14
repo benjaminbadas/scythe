@@ -25,12 +25,26 @@ Pour le jeu en ligne en local, lancer aussi l'API PHP : `php -S 127.0.0.1:8787 -
 | `src/engine/game.ts` | Règles : tour (section, action du haut, action du bas), combats, rencontres, Usine, recrues, objectifs, étoiles, fin de partie et décompte |
 | `src/engine/ai.ts` | IA (voir plus bas) |
 | `src/ai/` | Calcul de l'IA dans un Web Worker, et rythme de ses gestes à l'écran |
-| `src/ui/` | Interface React (plateau SVG, fiches, panneau du tour, combat secret, rencontres) |
+| `src/ui/` | Interface React : plateau SVG illustré (`Board.tsx`, dessins dans `art.tsx`), plateau joueur (`PlayerBoard.tsx`), panneau du tour, combat secret, rencontres |
 | `public/api/room.php` | Serveur des parties en ligne (PHP 8, sans base de données), repris d'Amerigo |
 
 Le moteur est pur et déterministe : l'état de la partie (y compris le générateur aléatoire) est un objet JSON, et
 `apply(état, action)` renvoie le nouvel état ou lève une `RuleError` expliquant le refus. `state.turn.player` désigne
 le joueur qui doit agir : c'est le défenseur pendant sa mise secrète d'un combat.
+
+## Habillage
+
+Le plateau est dessiné en SVG (aucune image du jeu n'est reprise), dans l'esprit de l'Europa des années 1920 de
+Scythe : carte sur papier vieilli, terrains illustrés (blés et meules, forêts de sapins, montagnes enneigées, derricks
+dans la toundra, villages fumants, lacs, Usine aux cheminées éteintes), carcasses de méchas de la Grande Guerre,
+rivières sinueuses, tunnels, jetons rencontre, emblèmes des factions. Les pièces ont leur silhouette : personnage et
+son animal, méchas marcheurs, ouvriers, structures (chevalement, obélisque, moulin, fortin), sacs, rondins, lingots et
+barils. Une légende sous la carte rappelle ce que produit chaque terrain.
+
+Le **plateau joueur** reprend la disposition des fiches : fiche faction (capacité, 4 méchas à débloquer, bonus
+immédiats de recrue, 6 étoiles) et fiche joueur en 4 colonnes (structure au-dessus de l'action du haut, cubes
+d'amélioration, ouvriers au-dessus de Produire qui révèlent son coût, cases de coût du bas recouvertes par les cubes,
+pièces gagnées, recrue et son bonus permanent). On y choisit sa section d'un clic ; chaque action s'explique au survol.
 
 ## Joueurs IA
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BOTTOM_NAMES,
   BOTTOM_RESOURCE,
@@ -41,7 +41,8 @@ import {
   type Structure,
   type UnitRef,
 } from '../engine';
-import { Board } from './Board';
+import { Board, Legend } from './Board';
+import { PlayerBoard } from './PlayerBoard';
 import { ChoiceForm, EnlistSelect, FactionDot, FinalPanel, Log, PlayerCard, ResPicker, Stepper, UpgradeSelect, bottomText, describeProduceCost, hexLabel, topText } from './Panels';
 import { BOTTOM_ICONS, FACTION_COLORS, FACTION_SHORT, RES_ICONS, TOP_ICONS } from './theme';
 
@@ -66,6 +67,9 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'joueurs' | 'journal'>('joueurs');
   const [zoom, setZoom] = useState(false);
+  const [matView, setMatView] = useState<number | null>(null);
+  // Au changement de joueur actif, le plateau affiché suit le nouveau joueur.
+  useEffect(() => setMatView(null), [s.turn?.active]);
   // Déplacement
   const [origin, setOrigin] = useState<number | null>(null);
   const [kind, setKind] = useState<UnitKind | null>(null);
@@ -192,6 +196,8 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const combatGate =
     myTurn && seat === null && humans > 1 && head?.k === 'combat' && revealed !== turnKey(s) ? s.players[actor] : null;
   const viewer = seat ?? (myTurn && !combatGate ? actor : null);
+  // Plateau joueur affiché : celui choisi, sinon le sien (en ligne) ou celui du joueur actif.
+  const matOf = matView ?? seat ?? Math.max(0, active);
 
   return (
     <div className="game">
@@ -218,6 +224,23 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
             {zoom ? '−' : '🔍'}
           </button>
           <Board s={s} targets={targets} picked={new Set(picked)} selected={moving ? origin : null} movable={moving ? movableHexes : undefined} onHex={myTurn ? onHex : undefined} />
+          <Legend />
+        </section>
+
+        <section className="panel mat-panel">
+          <div className="tabs">
+            {s.players.map((q, i) => (
+              <button key={i} className={matOf === i ? 'on' : ''} onClick={() => setMatView(i)}>
+                <FactionDot p={q} /> {q.name}
+              </button>
+            ))}
+          </div>
+          <PlayerBoard
+            p={s.players[matOf]}
+            current={matOf === active && t && t.stage !== 'section' ? t.section : null}
+            allowed={matOf === active && myTurn && actor === active && t?.stage === 'section' ? allowedSections(s, active) : undefined}
+            onSection={matOf === active && myTurn && actor === active && t?.stage === 'section' ? (i) => play({ t: 'section', i }) : undefined}
+          />
         </section>
 
         <aside className="side">
@@ -356,7 +379,7 @@ function SectionChoice({ s, play }: { s: GameState; play: Play }) {
   const sections = p.factoryCard !== null ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
   return (
     <div className="choices">
-      <p className="hint">Choisissez une section de votre fiche (différente de celle du tour précédent).</p>
+      <p className="hint">Choisissez une section ici ou directement sur votre plateau joueur, différente de celle du tour précédent.</p>
       {sections.map((i) => {
         const sa = sectionActions(p, i);
         const top = sa.top;
