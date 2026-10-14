@@ -205,9 +205,9 @@ input[type='checkbox'] {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 8px 14px;
+  gap: 12px;
+  flex-wrap: nowrap;
+  padding: 6px 12px;
   background: #15120e;
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -225,68 +225,289 @@ input[type='checkbox'] {
   gap: 6px;
   font-weight: 600;
 }
-.topbar > .ghost {
-  margin-left: auto;
-}
+
 
 .layout {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
-  grid-template-areas: 'board side' 'mat side';
-  gap: 12px;
-  padding: 12px;
-  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  min-height: 0;
 }
 .board-wrap {
   grid-area: board;
-}
-.mat-panel {
-  grid-area: mat;
-}
-.side {
-  grid-area: side;
-}
-@media (max-width: 900px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'board' 'side' 'mat';
-    padding: 8px;
-  }
-}
-
-.board-wrap {
   overflow: auto;
   border-radius: var(--radius);
   position: relative;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 0 2px #4a3a24, 0 0 0 5px #20180f;
+  background: #cdb689;
 }
-@media (max-width: 900px) {
-  .board-wrap {
-    max-height: 72vh;
-  }
+.mat-panel {
+  grid-area: mat;
+}
+.turn-area {
+  grid-area: turn;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.info {
+  grid-area: info;
 }
 .board {
   display: block;
-  width: 100%;
-  height: auto;
   user-select: none;
 }
-.board-wrap.zoomed .board {
-  width: 170%;
-  max-width: none;
-}
-.zoom {
-  position: sticky;
-  float: right;
-  top: 6px;
-  margin: 6px 6px -40px 0;
-  z-index: 2;
+.zoom,
+.legend-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
   width: 36px;
   height: 36px;
   padding: 0;
   border-radius: 50%;
-  background: rgba(21, 18, 14, 0.8);
+  background: rgba(21, 18, 14, 0.82);
+}
+.legend-btn {
+  right: 50px;
+}
+.board-wrap.zoomed .zoom,
+.board-wrap.zoomed .legend-btn {
+  position: sticky;
+  float: right;
+  margin: 8px 8px -44px 0;
+}
+
+/* Classique : tout à la suite, la page défile. */
+.layout-classic {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+  grid-template-areas: 'board turn' 'mat info';
+  align-items: start;
+}
+.layout-classic .board {
+  width: 100%;
+  height: auto;
+}
+.layout-classic .board-wrap.zoomed .board {
+  width: 170%;
+}
+
+/* Côte à côte et superposé : tout tient dans l'écran, chaque zone défile seule. */
+.game:has(.layout-side),
+.game:has(.layout-stack) {
+  height: 100vh;
+  overflow: hidden;
+}
+.layout-side .board-wrap,
+.layout-stack .board-wrap {
+  height: 100%;
+  min-height: 0;
+}
+.layout-side .board,
+.layout-stack .board {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+}
+.layout-side .board-wrap.zoomed .board,
+.layout-stack .board-wrap.zoomed .board {
+  height: 170%;
+  max-width: none;
+}
+.layout-side .mat-panel,
+.layout-side .turn-area,
+.layout-stack .mat-panel,
+.layout-stack .turn-area {
+  overflow: auto;
+  min-height: 0;
+}
+.layout-side {
+  grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'board mat' 'board turn';
+}
+.layout-side .mat-panel {
+  max-height: 64vh;
+}
+.layout-stack {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: 'board turn' 'mat mat';
+}
+.layout-stack .mat-panel {
+  max-height: 42vh;
+}
+.layout-stack .pmat {
+  grid-template-columns: minmax(250px, 28%) minmax(0, 1fr);
+  grid-template-areas: 'faction grid' 'secret grid';
+  align-items: start;
+}
+.layout-stack .pm-faction {
+  grid-area: faction;
+  grid-template-columns: 1fr;
+  grid-template-areas: 'crest' 'stars' 'ability' 'mechs' 'once';
+}
+.layout-stack .pm-secret {
+  grid-area: secret;
+}
+.layout-stack .pm-grid {
+  grid-area: grid;
+}
+.layout-stack .pm-mechs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Tiroir des joueurs et du journal. */
+.layout-side .info,
+.layout-stack .info {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(400px, 92vw);
+  z-index: 20;
+  overflow: auto;
+  padding: 10px;
+  background: rgba(20, 16, 11, 0.97);
+  border-left: 1px solid var(--line);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.6);
+  transform: translateX(105%);
+  transition: transform 0.2s ease;
+}
+.layout-side .info.open,
+.layout-stack .info.open {
+  transform: none;
+}
+.info-close {
+  margin-left: auto;
+  order: 2;
+}
+
+/* La légende flotte sur la carte dans les dispositions compactes. */
+.layout-side .legend,
+.layout-stack .legend {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  border-radius: 8px;
+  border: 1px solid #4a3a24;
+  background: rgba(36, 29, 20, 0.95);
+}
+
+@media (max-width: 900px) {
+  .layout.layout-classic,
+  .layout.layout-side,
+  .layout.layout-stack {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas: 'board' 'turn' 'mat' 'info';
+    padding: 8px;
+  }
+  .game:has(.layout-side),
+  .game:has(.layout-stack) {
+    height: auto;
+    overflow: visible;
+  }
+  .layout .board-wrap {
+    height: auto;
+    max-height: 72vh;
+  }
+  .layout .board {
+    width: 100%;
+    height: auto;
+  }
+  .layout .board-wrap.zoomed .board {
+    width: 170%;
+    height: auto;
+    max-width: none;
+  }
+  .layout .mat-panel {
+    max-height: none;
+  }
+  .layout-stack .pmat {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'faction' 'secret' 'grid';
+  }
+}
+
+/* Plateau joueur resserré */
+.pmat.compact .pm-mech {
+  padding: 4px;
+}
+.pmat.compact .pm-ability {
+  font-size: 0.76rem;
+}
+.pm-secret {
+  display: grid;
+  gap: 3px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #1b1712;
+  border: 1px dashed #5a4a32;
+  font-size: 0.8rem;
+}
+.pm-secret small {
+  color: var(--muted);
+}
+
+/* Barre du haut */
+.tb-players {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  min-width: 0;
+  flex: 1;
+}
+.tb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 14px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  background: #2a241b;
+}
+.tb-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tb-chip.viewed {
+  background: #3d3326;
+}
+.tb-stars {
+  color: var(--accent);
+}
+.tb-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.layout-switch {
+  display: inline-flex;
+}
+.layout-switch button {
+  border-radius: 0;
+  padding: 4px 9px;
+  font-size: 1rem;
+}
+.layout-switch button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.layout-switch button:last-child {
+  border-radius: 0 8px 8px 0;
+}
+@media (max-width: 900px) {
+  .layout-switch,
+  .tb-name {
+    display: none;
+  }
 }
 
 /* ——— Plateau : cases illustrées */
@@ -775,10 +996,7 @@ input[type='checkbox'] {
   color: #9fe07a;
 }
 
-.side {
-  display: grid;
-  gap: 12px;
-}
+
 .turn {
   border-width: 2px;
 }
@@ -1025,4 +1243,64 @@ input[type='checkbox'] {
   background: #4a3c1c;
   text-align: center;
   font-size: 0.9rem;
+}
+
+/* Finitions des dispositions compactes */
+.layout-side .mat-panel .tabs,
+.layout-stack .mat-panel .tabs {
+  display: none;
+}
+.layout-side .board-wrap,
+.layout-stack .board-wrap {
+  background: transparent;
+  box-shadow: none;
+}
+.layout-side .board,
+.layout-stack .board {
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.6));
+}
+.layout-side {
+  grid-template-columns: min(60vw, calc((100vh - 70px) * 1.05)) minmax(360px, 1fr);
+}
+.layout-stack .mat-panel {
+  max-height: 36vh;
+  padding: 8px;
+}
+.layout-stack .pm-faction {
+  padding: 8px;
+  gap: 6px;
+}
+.layout-stack .pm-mechs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.layout-stack .pm-mech .pm-svg {
+  width: 22px;
+  height: 22px;
+}
+.layout-stack .pm-mech b {
+  font-size: 0.68rem;
+}
+.layout-stack .pm-star {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+@media (max-width: 900px) {
+  .layout .mat-panel .tabs {
+    display: flex;
+  }
+}
+.layout-side {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.layout-side .mat-panel {
+  max-height: none;
+}
+.layout-side .turn-area {
+  max-height: 46vh;
+}
+.layout-side .pm-faction {
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'crest stars' 'ability ability' 'mechs once';
 }

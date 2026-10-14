@@ -46,6 +46,18 @@ immédiats de recrue, 6 étoiles) et fiche joueur en 4 colonnes (structure au-de
 d'amélioration, ouvriers au-dessus de Produire qui révèlent son coût, cases de coût du bas recouvertes par les cubes,
 pièces gagnées, recrue et son bonus permanent). On y choisit sa section d'un clic ; chaque action s'explique au survol.
 
+## Dispositions
+
+Trois dispositions au choix (boutons en haut à droite, mémorisées sur l'appareil) :
+
+- **Côte à côte** (par défaut sur ordinateur) : la carte à gauche sur toute la hauteur, le plateau joueur et le
+  panneau d'action à droite ; tout tient dans l'écran.
+- **Superposé** : la carte et le panneau d'action en haut, le plateau joueur sur toute la largeur en bas.
+- **Classique** (par défaut sur téléphone) : tout à la suite, avec défilement.
+
+Dans les deux premières, les joueurs et le journal passent dans un tiroir (📜), la légende s'affiche à la demande
+(🗺), et les pastilles des joueurs en haut de l'écran permettent de voir leur plateau.
+
 ## Joueurs IA
 
 En passe-et-joue, chaque place peut être tenue par l'ordinateur (case « 🤖 IA »). L'IA est « gourmande » :

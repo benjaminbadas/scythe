@@ -29,6 +29,7 @@ import {
   objectiveMet,
   reachable,
   sectionActions,
+  starCount,
   topValue,
   totalRes,
   workerHexes,
@@ -68,6 +69,13 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
   const [tab, setTab] = useState<'joueurs' | 'journal'>('joueurs');
   const [zoom, setZoom] = useState(false);
   const [matView, setMatView] = useState<number | null>(null);
+  const [layout, setLayoutState] = useState<Layout>(loadLayout);
+  const setLayout = (l: Layout) => {
+    setLayoutState(l);
+    saveLayout(l);
+  };
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
   // Au changement de joueur actif, le plateau affiché suit le nouveau joueur.
   useEffect(() => setMatView(null), [s.turn?.active]);
   // Déplacement
@@ -208,23 +216,54 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
         </div>
         <div title="Cartes Usine restantes">🏭 {s.factoryPool.length}</div>
         <div title="Jetons rencontre restants">✦ {s.board.encounters.filter(Boolean).length}</div>
-        {ap && s.status === 'playing' && (
-          <div className="tb-active">
-            <FactionDot p={ap} /> {ap.name}
+        <div className="tb-players">
+          {s.order.map((i) => {
+            const q = s.players[i];
+            return (
+              <button
+                key={i}
+                className={`tb-chip${i === active ? ' active' : ''}${i === matOf ? ' viewed' : ''}`}
+                onClick={() => setMatView(i)}
+                title={`${q.name} — ${FACTION_SHORT[q.faction]} : ${q.coins} $, ${q.power} puissance, ${q.popularity} popularité. Cliquez pour voir son plateau.`}
+              >
+                <FactionDot p={q} />
+                <span className="tb-name">{q.name}</span>
+                <span className="tb-stars">★{starCount(q)}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="tb-right">
+          <div className="layout-switch" role="group" aria-label="Disposition">
+            {LAYOUTS.map((l) => (
+              <button key={l.id} className={layout === l.id ? 'on' : ''} onClick={() => setLayout(l.id)} title={l.title}>
+                {l.icon}
+              </button>
+            ))}
           </div>
-        )}
-        <button className="ghost" onClick={onQuit}>
-          Quitter
-        </button>
+          {layout !== 'classic' && (
+            <button className={infoOpen ? 'on' : ''} onClick={() => setInfoOpen(!infoOpen)} title="Joueurs et journal">
+              📜
+            </button>
+          )}
+          <button className="ghost" onClick={onQuit}>
+            Quitter
+          </button>
+        </div>
       </header>
 
-      <main className="layout">
+      <main className={`layout layout-${layout}`}>
         <section className={`board-wrap${zoom ? ' zoomed' : ''}`}>
           <button className="zoom" onClick={() => setZoom(!zoom)} aria-label={zoom ? 'Dézoomer' : 'Zoomer'} title={zoom ? 'Dézoomer' : 'Zoomer'}>
             {zoom ? '−' : '🔍'}
           </button>
           <Board s={s} targets={targets} picked={new Set(picked)} selected={moving ? origin : null} movable={moving ? movableHexes : undefined} onHex={myTurn ? onHex : undefined} />
-          <Legend />
+          {layout !== 'classic' && (
+            <button className={`legend-btn${legendOpen ? ' on' : ''}`} onClick={() => setLegendOpen(!legendOpen)} title="Légende des terrains" aria-label="Légende">
+              🗺
+            </button>
+          )}
+          {(layout === 'classic' || legendOpen) && <Legend />}
         </section>
 
         <section className="panel mat-panel">
@@ -240,10 +279,12 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
             current={matOf === active && t && t.stage !== 'section' ? t.section : null}
             allowed={matOf === active && myTurn && actor === active && t?.stage === 'section' ? allowedSections(s, active) : undefined}
             onSection={matOf === active && myTurn && actor === active && t?.stage === 'section' ? (i) => play({ t: 'section', i }) : undefined}
+            secret={viewer === matOf && layout !== 'classic'}
+            compact={layout !== 'classic'}
           />
         </section>
 
-        <aside className="side">
+        <div className="turn-area">
           {s.status === 'finished' ? (
             <FinalPanel s={s} />
           ) : t && p && ap ? (
@@ -271,7 +312,11 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
                   </button>
                 </div>
               ) : t.stage === 'section' ? (
-                <SectionChoice s={s} play={play} />
+                layout === 'classic' ? (
+                  <SectionChoice s={s} play={play} />
+                ) : (
+                  <p className="hint">👉 Cliquez une colonne de votre plateau joueur (pas celle du tour précédent).</p>
+                )
               ) : t.stage === 'top' ? (
                 <TopControls
                   s={s}
@@ -344,9 +389,16 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
               )}
             </section>
           ) : null}
+        </div>
 
+        <aside className={`info${infoOpen ? ' open' : ''}`}>
           <section className="panel">
             <div className="tabs">
+              {layout !== 'classic' && (
+                <button className="ghost info-close" onClick={() => setInfoOpen(false)} aria-label="Fermer">
+                  ✕
+                </button>
+              )}
               <button className={tab === 'joueurs' ? 'on' : ''} onClick={() => setTab('joueurs')}>
                 Joueurs
               </button>
@@ -371,6 +423,31 @@ export function GameScreen({ game: s, seat, onPlay, onQuit, onUndo }: Props) {
 }
 
 type Play = (a: Action) => void;
+
+type Layout = 'side' | 'stack' | 'classic';
+const LAYOUTS: { id: Layout; icon: string; title: string }[] = [
+  { id: 'side', icon: '◧', title: 'Côte à côte : la carte à gauche, plateau joueur et actions à droite' },
+  { id: 'stack', icon: '⬒', title: 'Superposé : la carte et les actions en haut, le plateau joueur en bas' },
+  { id: 'classic', icon: '☰', title: 'Classique : tout à la suite, avec défilement' },
+];
+
+function loadLayout(): Layout {
+  try {
+    const v = localStorage.getItem('scythe.disposition');
+    if (v === 'side' || v === 'stack' || v === 'classic') return v;
+  } catch {
+    // stockage indisponible
+  }
+  return typeof window !== 'undefined' && window.innerWidth < 900 ? 'classic' : 'side';
+}
+
+function saveLayout(l: Layout) {
+  try {
+    localStorage.setItem('scythe.disposition', l);
+  } catch {
+    // ignoré
+  }
+}
 
 function SectionChoice({ s, play }: { s: GameState; play: Play }) {
   const t = s.turn!;

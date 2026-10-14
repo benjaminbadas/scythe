@@ -6,6 +6,7 @@ import {
   FACTORY_CARDS,
   MATS,
   MECH_NAMES,
+  OBJECTIVE_TEXT,
   RECRUIT_ONCE,
   STRUCTURES,
   STRUCTURE_ACTION,
@@ -178,17 +179,21 @@ interface Props {
   /** Sections cliquables (choix de la section du tour). */
   allowed?: number[];
   onSection?: (i: number) => void;
+  /** Afficher la main et les objectifs (plateau de celui qui regarde). */
+  secret?: boolean;
+  /** Version resserrée : descriptions des méchas en infobulle. */
+  compact?: boolean;
 }
 
 /** Plateau du joueur, disposé comme les fiches du jeu : fiche faction en haut, fiche joueur dessous. */
-export function PlayerBoard({ p, current, allowed, onSection }: Props) {
+export function PlayerBoard({ p, current, allowed, onSection, secret, compact }: Props) {
   const m = MATS[p.mat];
   const ab = FACTION_ABILITY[p.faction];
   const color = FACTION_COLORS[p.faction];
   const ink = FACTION_INK[p.faction];
   const sections = p.factoryCard !== null ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
   return (
-    <div className="pmat" style={{ ['--fc' as string]: color, ['--fi' as string]: ink }}>
+    <div className={`pmat${compact ? ' compact' : ''}`} style={{ ['--fc' as string]: color, ['--fi' as string]: ink }}>
       {/* Fiche faction */}
       <div className="pm-faction">
         <div className="pm-crest">
@@ -234,7 +239,7 @@ export function PlayerBoard({ p, current, allowed, onSection }: Props) {
                 </Svg>
               )}
               <b>{MECH_NAMES[k]}</b>
-              <small>{k === 'riverwalk' ? riverwalkText(p) : MECH_TEXT[k].split(' : ')[1]}</small>
+              {!compact && <small>{k === 'riverwalk' ? riverwalkText(p) : MECH_TEXT[k].split(' : ')[1]}</small>}
             </div>
           ))}
         </div>
@@ -247,6 +252,19 @@ export function PlayerBoard({ p, current, allowed, onSection }: Props) {
           ))}
         </div>
       </div>
+
+      {secret && (
+        <div className="pm-secret">
+          <span title="Vos cartes Combat (secrètes)">
+            🃏 {p.hand.length ? [...p.hand].sort((a, b) => a - b).join(' · ') : 'aucune carte'}
+          </span>
+          {p.objectives.map((o) => (
+            <span key={o} title={OBJECTIVE_TEXT[o].text}>
+              📜 <b>{OBJECTIVE_TEXT[o].title}</b> <small>{OBJECTIVE_TEXT[o].text}</small>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Fiche joueur */}
       <div className={`pm-grid cols-${sections.length}`}>
